@@ -1,0 +1,205 @@
+diff -ruN musl/arch/x86_64/syscall_arch.h musl_patched/arch/x86_64/syscall_arch.h
+--- musl/arch/x86_64/syscall_arch.h	2017-01-10 13:02:56.863283966 +0100
++++ musl_patched/arch/x86_64/syscall_arch.h	2017-01-10 13:03:14.147190522 +0100
+@@ -61,8 +61,3 @@
+ 	return ret;
+ }
+ 
+-#define VDSO_USEFUL
+-#define VDSO_CGT_SYM "__vdso_clock_gettime"
+-#define VDSO_CGT_VER "LINUX_2.6"
+-#define VDSO_GETCPU_SYM "__vdso_getcpu"
+-#define VDSO_GETCPU_VER "LINUX_2.6"
+diff -ruN musl/include/signal.h musl_patched/include/signal.h
+--- musl/include/signal.h	2017-01-10 13:02:56.923283640 +0100
++++ musl_patched/include/signal.h	2017-01-10 13:03:14.175190368 +0100
+@@ -266,3 +266,4 @@
+ #endif
+ 
+ #endif
++char *sys_siglist;
+diff -ruN musl/include/sys/sysmacros.h musl_patched/include/sys/sysmacros.h
+--- musl/include/sys/sysmacros.h	2017-01-10 13:02:56.867283944 +0100
++++ musl_patched/include/sys/sysmacros.h	2017-01-10 13:03:14.175190368 +0100
+@@ -13,3 +13,8 @@
+ 	(((y)&0x000000ffULL)) )
+ 
+ #endif
++int gnu_dev_minor(int x);
++int gnu_dev_major(int x);
++int gnu_dev_makedev(int x, int y);
++
++int __muloti4(int a, int b, int* overflow);
+diff -ruN musl/ldso/dynlink.c musl_patched/ldso/dynlink.c
+--- musl/ldso/dynlink.c	2017-01-10 13:02:56.923283640 +0100
++++ musl_patched/ldso/dynlink.c	2017-01-10 13:03:14.143190543 +0100
+@@ -928,6 +928,7 @@
+ 			}
+ 		}
+ 	}
++	 if (ldso.name == NULL) { return 0; }
+ 	if (!strcmp(name, ldso.name)) is_self = 1;
+ 	if (is_self) {
+ 		if (!ldso.prev) {
+@@ -1920,15 +1921,4 @@
+ 
+ static void error(const char *fmt, ...)
+ {
+-	va_list ap;
+-	va_start(ap, fmt);
+-	if (!runtime) {
+-		vdprintf(2, fmt, ap);
+-		dprintf(2, "\n");
+-		ldso_fail = 1;
+-		va_end(ap);
+-		return;
+-	}
+-	__dl_vseterr(fmt, ap);
+-	va_end(ap);
+ }
+diff -ruN musl/src/ctype/__ctype_get_mb_cur_max.c musl_patched/src/ctype/__ctype_get_mb_cur_max.c
+--- musl/src/ctype/__ctype_get_mb_cur_max.c	2017-01-10 13:02:56.871283922 +0100
++++ musl_patched/src/ctype/__ctype_get_mb_cur_max.c	2017-01-10 13:03:14.151190500 +0100
+@@ -3,5 +3,5 @@
+ 
+ size_t __ctype_get_mb_cur_max()
+ {
+-	return MB_CUR_MAX;
++	return 1;
+ }
+diff -ruN musl/src/errno/strerror.c musl_patched/src/errno/strerror.c
+--- musl/src/errno/strerror.c	2017-01-10 13:02:56.871283922 +0100
++++ musl_patched/src/errno/strerror.c	2017-01-10 13:03:14.151190500 +0100
+@@ -26,7 +26,7 @@
+ 	}
+ 	for (i=0; errid[i] && errid[i] != e; i++);
+ 	for (s=errmsg; i; s++, i--) for (; *s; s++);
+-	return (char *)LCTRANS(s, LC_MESSAGES, loc);
++	return s;
+ }
+ 
+ char *strerror(int e)
+diff -ruN musl/src/internal/locale_impl.h musl_patched/src/internal/locale_impl.h
+--- musl/src/internal/locale_impl.h	2017-01-10 13:02:56.871283922 +0100
++++ musl_patched/src/internal/locale_impl.h	2017-01-10 13:03:14.151190500 +0100
+@@ -24,15 +24,15 @@
+ const char *__lctrans(const char *, const struct __locale_map *);
+ const char *__lctrans_cur(const char *);
+ 
+-#define LCTRANS(msg, lc, loc) __lctrans(msg, (loc)->cat[(lc)])
+-#define LCTRANS_CUR(msg) __lctrans_cur(msg)
++#define LCTRANS(msg, lc, loc) msg
++#define LCTRANS_CUR(msg) msg
+ 
+ #define C_LOCALE ((locale_t)&__c_locale)
+ #define UTF8_LOCALE ((locale_t)&__c_dot_utf8_locale)
+ 
+ #define CURRENT_LOCALE (__pthread_self()->locale)
+ 
+-#define CURRENT_UTF8 (!!__pthread_self()->locale->cat[LC_CTYPE])
++#define CURRENT_UTF8 1// (!!__pthread_self()->locale->cat[LC_CTYPE])
+ 
+ #undef MB_CUR_MAX
+ #define MB_CUR_MAX (CURRENT_UTF8 ? 4 : 1)
+diff -ruN musl/src/locale/langinfo.c musl_patched/src/locale/langinfo.c
+--- musl/src/locale/langinfo.c	2017-01-10 13:02:56.875283901 +0100
++++ musl_patched/src/locale/langinfo.c	2017-01-10 13:03:14.155190478 +0100
+@@ -33,7 +33,7 @@
+ 	int idx = item & 65535;
+ 	const char *str;
+ 
+-	if (item == CODESET) return MB_CUR_MAX==1 ? "ASCII" : "UTF-8";
++	if (item == CODESET) return "ASCII";// return MB_CUR_MAX==1 ? "ASCII" : "UTF-8";
+ 	
+ 	switch (cat) {
+ 	case LC_NUMERIC:
+@@ -63,7 +63,7 @@
+ 
+ char *__nl_langinfo(nl_item item)
+ {
+-	return __nl_langinfo_l(item, CURRENT_LOCALE);
++	return "";//(item, CURRENT_LOCALE);
+ }
+ 
+ weak_alias(__nl_langinfo, nl_langinfo);
+diff -ruN musl/src/string/strsignal.c musl_patched/src/string/strsignal.c
+--- musl/src/string/strsignal.c	2017-01-10 13:02:56.895283793 +0100
++++ musl_patched/src/string/strsignal.c	2017-01-10 13:03:14.171190390 +0100
+@@ -114,3 +114,4 @@
+ 
+ 	return (char *)LCTRANS_CUR(s);
+ }
++extern char *sys_siglist = strings;
+diff -ruN musl/src/time/nanosleep.c musl_patched/src/time/nanosleep.c
+--- musl/src/time/nanosleep.c	2017-01-10 13:02:56.899283771 +0100
++++ musl_patched/src/time/nanosleep.c	2017-01-10 13:03:14.175190368 +0100
+@@ -6,3 +6,69 @@
+ {
+ 	return syscall_cp(SYS_nanosleep, req, rem);
+ }
++int gnu_dev_minor(int x){
++  return  ((unsigned)( (((x)>>12) & 0xffffff00) | ((x) & 0x000000ff) ));
++}
++
++int gnu_dev_major(int x){
++  return	((unsigned)( (((x)>>31>>1) & 0xfffff000) | (((x)>>8) & 0x00000fff) ));
++}
++
++int gnu_dev_makedev(int x, int y){
++  return         (((x)&0xfffff000ULL) << 32) | 	(((x)&0x00000fffULL) << 8) |         (((y)&0xffffff00ULL) << 12) |     (((y)&0x000000ffULL));
++}
++/*===-- muloti4.c - Implement __muloti4 -----------------------------------===
++ *
++ *                     The LLVM Compiler Infrastructure
++ *
++ * This file is dual licensed under the MIT and the University of Illinois Open
++ * Source Licenses. See LICENSE.TXT for details.
++ *
++ * ===----------------------------------------------------------------------===
++ *
++ * This file implements __muloti4 for the compiler_rt library.
++ *
++ * ===----------------------------------------------------------------------===
++ */
++
++/* Returns: a * b */
++
++/* Effects: sets *overflow to 1  if a * b overflows */
++
++int __muloti4(int a, int b, int* overflow)
++{
++    const int N = (int)(sizeof(int) * CHAR_BIT);
++    const int MIN = (int)1 << (N-1);
++    const int MAX = ~MIN;
++    *overflow = 0;
++    int result = a * b;
++    if (a == MIN)
++    {
++        if (b != 0 && b != 1)
++	    *overflow = 1;
++	return result;
++    }
++    if (b == MIN)
++    {
++        if (a != 0 && a != 1)
++	    *overflow = 1;
++        return result;
++    }
++    int sa = a >> (N - 1);
++    int abs_a = (a ^ sa) - sa;
++    int sb = b >> (N - 1);
++    int abs_b = (b ^ sb) - sb;
++    if (abs_a < 2 || abs_b < 2)
++        return result;
++    if (sa == sb)
++    {
++        if (abs_a > MAX / abs_b)
++            *overflow = 1;
++    }
++    else
++    {
++        if (abs_a > MIN / -abs_b)
++            *overflow = 1;
++    }
++    return result;
++}

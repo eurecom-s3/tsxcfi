@@ -1,0 +1,65 @@
+#!/bin/bash
+
+root=`dirname $(readlink -f $0)`
+buildpath=$root/build
+srcpath=$root/src
+mode=$TSXCFI_MODE
+libcpath=$buildpath/libc/musl_"$mode"_relro/lib
+
+if [ -s $TSXCFI_MODE ]; then echo "Please source switch.sh in the root folder of the project, and switch in one of the 3 mode"; exit 1; fi; 
+if [ -z $"@" ]; then exit 1; fi;
+
+args="$@";
+
+command="$buildpath/llvm/llvm-build/bin/clang $args -fno-optimize-sibling-calls -nostdlib -nodefaultlibs -Qunused-arguments -mllvm -tsx-cfi=$mode"
+
+fblib="hlefb" # in native mode it's never called from the code
+if [ $mode == "rtm" ]; then
+    command+=" -Wl,--dynamic-linker=$root/build/ld/glibc_build_rtm/elf/ld-linux-x86-64.so.2" 
+    fblib="rtmfb-relro"
+elif [ $mode == "hle" ]; then
+    command+=" -Wl,--dynamic-linker=$root/build/ld/glibc_build_hle/elf/ld-linux-x86-64.so.2" 
+    fblib="hlefb-relro"
+fi
+
+if [ -z $TSXCFI_LIBC ]; then
+    command+=" -L$libcpath/"
+fi
+
+if  [[ $command == *"-shared"* ]]; then
+    command+=" -Wl,-Bsymbolic  -Wl,--whole-archive,$buildpath/libtsxcfifb/lib$fblib.a  -Wl,--no-whole-archive"
+else
+    command+=" -L$buildpath/libtsxcfifb -l$fblib -lc -Wl,$libcpath/crt1.o"
+fi;
+
+command+=" -nostartfiles -lgcc -Wl,-z,relro,-z,now -mllvm -tsx-cfi-static"
+
+# Finally running clang..
+eval "$command";
+# If it's native we don't need to binpatch any file
+if [ $mode == "native" ]; then
+    exit
+fi;
+
+if  [[ $args != *"-c "* ]]; then
+    name=a.out
+    MAGIC=`getopt -o o:c -- "$@" 2>/dev/null`
+    eval set -- "$MAGIC"
+
+    while true ; do
+	    case "$1" in
+	        -o)
+		        shift;
+		        name=$1
+		        break
+		        ;;
+	        -c)
+		        exit $ret
+		        ;;
+	        *)
+		        break
+		        ;;
+	    esac
+    done
+    python $srcpath/bin_patcher.py $name
+fi

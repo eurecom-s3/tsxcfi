@@ -1,0 +1,36 @@
+Binary files glibc_tmp/.git/index and ./glibc/.git/index differ
+diff -ur glibc/sysdeps/x86_64/dl-machine.h ./glibc_tmp/sysdeps/x86_64/dl-machine.h
+--- glibc/sysdeps/x86_64/dl-machine.h	2017-01-13 11:41:29.874156804 +0100
++++ ./glibc_tmp/sysdeps/x86_64/dl-machine.h	2017-01-13 11:41:20.410207696 +0100
+@@ -28,6 +28,7 @@
+ #include <dl-tlsdesc.h>
+ #include <cpu-features.c>
+ 
++int got_cnt;
+ /* Return nonzero iff ELF header is compatible with the running host.  */
+ static inline int __attribute__ ((unused))
+ elf_machine_matches_host (const ElfW(Ehdr) *ehdr)
+@@ -328,7 +329,9 @@
+ # endif
+ 	case R_X86_64_GLOB_DAT:
+ 	case R_X86_64_JUMP_SLOT:
+-	  *reloc_addr = value + reloc->r_addend;
++      *reloc_addr = value + reloc->r_addend;
++      if( ( ( **(int **) reloc_addr ) & 0xffffff) == 0xd5010f) // If it points to a xend, just skip it
++        *reloc_addr = value + reloc->r_addend + 3;
+ 	  break;
+ 
+ # ifndef RESOLVE_CONFLICT_FIND_MAP
+diff -ur glibc/sysdeps/x86_64/dl-trampoline.h ./glibc_tmp/sysdeps/x86_64/dl-trampoline.h
+--- glibc/sysdeps/x86_64/dl-trampoline.h	2017-01-13 11:41:29.874156804 +0100
++++ ./glibc_tmp/sysdeps/x86_64/dl-trampoline.h	2017-01-13 11:41:20.410207696 +0100
+@@ -157,7 +157,8 @@
+ 	cfi_adjust_cfa_offset(-(LOCAL_STORAGE_AREA + 16))
+ 	# Preserve bound registers.
+ 	PRESERVE_BND_REGS_PREFIX
+-	jmp *%r11		# Jump to function address.
++    add $3, %r11    # Add rtm-offset
++    jmp *%r11		# Jump to function address.
+ 	cfi_endproc
+ 	.size _dl_runtime_resolve, .-_dl_runtime_resolve
+ 

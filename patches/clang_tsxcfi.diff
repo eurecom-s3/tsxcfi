@@ -1,0 +1,100 @@
+diff -ur ./llvm/lib/Target/X86/CMakeLists.txt ../../../tsxcfi/llvm/llvm/lib/Target/X86/CMakeLists.txt
+--- ./llvm/lib/Target/X86/CMakeLists.txt	2015-12-31 23:40:45.000000000 +0100
++++ ../../../tsxcfi/llvm/llvm/lib/Target/X86/CMakeLists.txt	2016-03-30 15:01:17.000000000 +0200
+@@ -36,6 +36,8 @@
+   X86FixupLEAs.cpp
+   X86WinEHState.cpp
+   X86OptimizeLEAs.cpp
++  X86TsxCFI.cpp
++  X86TsxRewriteCallReg.cpp
+   )
+ 
+ add_llvm_target(X86CodeGen ${sources})
+diff -ur ./llvm/lib/Target/X86/X86.h ../../../tsxcfi/llvm/llvm/lib/Target/X86/X86.h
+--- ./llvm/lib/Target/X86/X86.h	2016-01-13 12:30:44.000000000 +0100
++++ ../../../tsxcfi/llvm/llvm/lib/Target/X86/X86.h	2016-03-30 15:03:45.000000000 +0200
+@@ -71,6 +71,11 @@
+ /// instructions into a sequence of actual instructions. This pass
+ /// must run after prologue/epilogue insertion and before lowering
+ /// the MachineInstr to MC.
++FunctionPass *createTsxCfiRTM();
++FunctionPass *createTsxCfiHLE();
++FunctionPass *createTsxCfiNATIVE();
++FunctionPass *createTsxRewriteCallReg();
++FunctionPass *createTsxCfiWrapper();
+ FunctionPass *createX86ExpandPseudoPass();
+ } // End llvm namespace
+ 
+diff -ur ./llvm/lib/Target/X86/X86InstrControl.td ../../../tsxcfi/llvm/llvm/lib/Target/X86/X86InstrControl.td
+--- ./llvm/lib/Target/X86/X86InstrControl.td	2015-12-21 15:07:14.000000000 +0100
++++ ../../../tsxcfi/llvm/llvm/lib/Target/X86/X86InstrControl.td	2016-03-30 15:04:28.000000000 +0200
+@@ -280,8 +280,8 @@
+                         (outs), (ins i64i32imm_pcrel:$dst),
+                         "call{q}\t$dst", [], IIC_CALL_RI>, OpSize32,
+                       Requires<[In64BitMode]>;
+-  def CALL64r       : I<0xFF, MRM2r, (outs), (ins GR64:$dst),
+-                        "call{q}\t{*}$dst", [(X86call GR64:$dst)],
++  def CALL64r       : I<0xFF, MRM2r, (outs), (ins GR64_TSX:$dst),
++                        "call{q}\t{*}$dst", [(X86call GR64_TSX:$dst)],
+                         IIC_CALL_RI>,
+                       Requires<[In64BitMode]>;
+   def CALL64m       : I<0xFF, MRM2m, (outs), (ins i64mem:$dst),
+diff -ur ./llvm/lib/Target/X86/X86RegisterInfo.td ../../../tsxcfi/llvm/llvm/lib/Target/X86/X86RegisterInfo.td
+--- ./llvm/lib/Target/X86/X86RegisterInfo.td	2015-12-14 23:08:36.000000000 +0100
++++ ../../../tsxcfi/llvm/llvm/lib/Target/X86/X86RegisterInfo.td	2016-03-30 15:06:40.000000000 +0200
+@@ -349,6 +349,10 @@
+                          (add RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11,
+                               RBX, R14, R15, R12, R13, RBP, RSP, RIP)>;
+ 
++def GR64_TSX : RegisterClass<"X86", [i64], 64,
++                         (add RAX, RCX, RDX, RSI, RDI, R8, R9, RBX,
++			      	   R14, R15, R12, R13, RBP, RSP, RIP)>;
++
+ // Segment registers for use by MOV instructions (and others) that have a
+ //   segment register as one operand.  Always contain a 16-bit segment
+ //   descriptor.
+diff -ur ./llvm/lib/Target/X86/X86TargetMachine.cpp ../../../tsxcfi/llvm/llvm/lib/Target/X86/X86TargetMachine.cpp
+--- ./llvm/lib/Target/X86/X86TargetMachine.cpp	2015-12-04 11:53:15.000000000 +0100
++++ ../../../tsxcfi/llvm/llvm/lib/Target/X86/X86TargetMachine.cpp	2016-04-01 17:41:19.000000000 +0200
+@@ -254,6 +254,7 @@
+ }
+ 
+ void X86PassConfig::addPreRegAlloc() {
++  addPass(createTsxRewriteCallReg());
+   if (getOptLevel() != CodeGenOpt::None)
+     addPass(createX86OptimizeLEAs());
+ 
+@@ -277,4 +278,7 @@
+     addPass(createX86PadShortFunctions());
+     addPass(createX86FixupLEAs());
+   }
++  // addPass(createTsxCfiRTM());
++  // addPass(createTsxCfiHLE());
++  addPass(createTsxCfiWrapper());
+ }
+Only in ../../../tsxcfi/llvm/llvm/lib/Target/X86: X86TsxCFI.cpp
+Only in ../../../tsxcfi/llvm/llvm/lib/Target/X86: X86TsxRewriteCallReg.cpp
+Only in ../../../tsxcfi/llvm/llvm/utils/llvm-build/llvmbuild: componentinfo.pyc
+Only in ../../../tsxcfi/llvm/llvm/utils/llvm-build/llvmbuild: configutil.pyc
+Only in ../../../tsxcfi/llvm/llvm/utils/llvm-build/llvmbuild: __init__.pyc
+Only in ../../../tsxcfi/llvm/llvm/utils/llvm-build/llvmbuild: main.pyc
+Only in ../../../tsxcfi/llvm/llvm/utils/llvm-build/llvmbuild: util.pyc
+diff -ur ./llvm/utils/TableGen/X86RecognizableInstr.cpp ../../../tsxcfi/llvm/llvm/utils/TableGen/X86RecognizableInstr.cpp
+--- ./llvm/utils/TableGen/X86RecognizableInstr.cpp	2015-12-24 09:25:00.000000000 +0100
++++ ../../../tsxcfi/llvm/llvm/utils/TableGen/X86RecognizableInstr.cpp	2016-04-01 17:41:25.000000000 +0200
+@@ -932,6 +932,7 @@
+   TYPE("i16imm",              TYPE_IMM16)
+   TYPE("i16i8imm",            TYPE_IMMv)
+   TYPE("GR16",                TYPE_R16)
++  TYPE("GR64_TSX",            TYPE_R64)
+   TYPE("i32mem",              TYPE_Mv)
+   TYPE("i32imm",              TYPE_IMMv)
+   TYPE("i32i8imm",            TYPE_IMM32)
+@@ -1090,6 +1091,7 @@
+   ENCODING("GR32",            ENCODING_RM)
+   ENCODING("GR32orGR64",      ENCODING_RM)
+   ENCODING("GR64",            ENCODING_RM)
++  ENCODING("GR64_TSX",        ENCODING_RM)
+   ENCODING("GR8",             ENCODING_RM)
+   ENCODING("VR128",           ENCODING_RM)
+   ENCODING("VR128X",          ENCODING_RM)
